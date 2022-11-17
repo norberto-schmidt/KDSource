@@ -490,14 +490,21 @@ class SurfaceSourceFile:
 
         for i, (bin, var) in enumerate(zip(bins, vars)):
             if var in norm_vars:
-                p_mean = p_mean / dx[i] / YSCALE[var]
-                p_stdv = p_stdv / dx[i] / YSCALE[var]
+                p_mean = p_mean / YSCALE[var]
+                p_stdv = p_stdv / YSCALE[var]
                 if var == 'psi':
-                    p_mean = p_mean / np.sin(xmed[i])
-                    p_stdv = p_stdv / np.sin(xmed[i])
+                    p_mean = p_mean / (-np.cos(xright[i]) + np.cos(xleft[i]))
+                    p_stdv = p_stdv / (-np.cos(xright[i]) + np.cos(xleft[i]))
                 elif var == 'R':
-                    p_mean = p_mean / xmed[i]
-                    p_stdv = p_stdv / xmed[i]
+                    p_mean = p_mean / (xright[i]**2 / 2 - xleft[i]**2 / 2)
+                    p_stdv = p_stdv / (xright[i]**2 / 2 - xleft[i]**2 / 2)
+                elif var == 'lambda':
+                    p_mean = p_mean / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
+                    p_stdv = p_stdv / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
+                else:
+                    p_mean = p_mean / dx[i]
+                    p_stdv = p_stdv / dx[i]
+
             # Convert the angles from radians to degrees
             if var == 'psi' or var == 'phi' or var == 'theta':
                 bins[i] = np.rad2deg(bins[i])
