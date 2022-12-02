@@ -146,6 +146,7 @@ class SurfaceSourceFile:
                 df['py'] = 0.0
                 df['pz'] = 0.0
                 df['userflags'] = 0x00000000
+                df = df[df['id']<self._max_particles]
         # MCPL format
         elif self._extension == '.gz' or self._extension == '.mcpl':
             with mcpl.MCPLFile(self._filepath, blocklength=self._max_particles) as mcpl_file:
@@ -498,9 +499,9 @@ class SurfaceSourceFile:
                 elif var == 'R':
                     p_mean = p_mean / (xright[i]**2 / 2 - xleft[i]**2 / 2)
                     p_stdv = p_stdv / (xright[i]**2 / 2 - xleft[i]**2 / 2)
-                elif var == 'lambda':
-                    p_mean = p_mean / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
-                    p_stdv = p_stdv / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
+                # elif var == 'lambda':
+                #     p_mean = p_mean / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
+                #     p_stdv = p_stdv / ((252.8 / 72.3)**-2 * (-xright[i]**-2 + xleft[i]**-2))
                 else:
                     p_mean = p_mean / dx[i]
                     p_stdv = p_stdv / dx[i]
@@ -566,9 +567,8 @@ class SurfaceSourceFile:
         Jlabel = self._get_units(norm_vars)
 
         if len(bins) == 1:
-            Jbrill = 'Brilliance' if ylabel == None else ylabel
-            Jlabel = '{:s}'.format(
-                Jbrill) if Jlabel == '' else '{:s} [ {:s} ]'.format(Jbrill, Jlabel)
+            Jbrill = 'Brilliance' if ylabel == None else '{:s}'.format(ylabel)
+            Jlabel = '{:s}'.format(Jbrill) if Jlabel == '' else '{:s} [ {:s} ]'.format(Jbrill, Jlabel)
             if xscale == 'log':
                 if info:
                     print("Plotting x*f(x) instead of f(x) (xscale='log')")
@@ -592,7 +592,7 @@ class SurfaceSourceFile:
                     XLATEX[vars[0]], XUNITS[vars[0]]))
             else:
                 plt.xlabel(r'${:s}$'.format(XLATEX[vars[0]]))
-            plt.ylabel(Jlabel)
+            plt.ylabel(r'{:s}'.format(Jlabel))
         elif len(bins) == 2:
             Jbrill = 'Brilliance' if zlabel == None else zlabel
             Jlabel = '{:s}'.format(
@@ -635,12 +635,12 @@ class SurfaceSourceFile:
             if zscale == 'linear':
                 plt.pcolor(0.5*(bins1[1:]+bins1[:-1]), 0.5*(bins2[1:] +
                            bins2[:-1]), z_mean, shading='auto', **kwargs)
-                cbar = plt.colorbar(label=Jlabel)
+                cbar = plt.colorbar(label=r'{:s}'.format(Jlabel))
                 lvls = np.linspace(cbar.vmin, cbar.vmax, zlevels)
             elif zscale == 'log':
                 plt.pcolor(0.5*(bins1[1:]+bins1[:-1]), 0.5*(bins2[1:]+bins2[:-1]),
                            z_mean, shading='auto', norm=LogNorm(), **kwargs)
-                cbar = plt.colorbar(label=Jlabel)
+                cbar = plt.colorbar(label=r'{:s}'.format(Jlabel))
                 lvls = np.logspace(np.floor(np.log10(cbar.vmin)),
                                    np.ceil(np.log10(cbar.vmax)),
                                    int(np.ceil(np.log10(cbar.vmax))-np.floor(np.log10(cbar.vmin))+1))
