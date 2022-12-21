@@ -107,7 +107,11 @@ class SurfaceSourceFile:
         Define the surface id to extract the particles from the tracks file.
         Default: None
     Nmax: int
-        Define the 
+        Define the maximum number of particles to be readed.
+    current: float
+        Current, in mA, to normalize the results.
+    tpulse: float
+        Pulse width, in s, to normalize the results.
     """
 
     def __init__(self, filepath, S0=1.0, Nparticles=1e9, dA=None,
@@ -407,27 +411,53 @@ class SurfaceSourceFile:
         vars: list of str
             Variables to calculate the distribution
         bins: list of int or list of iterable
-            Bins
+            Number or array of bins to calculate the distribution.
             If int, then the distributions are going to be calculated between
-            min(var), max(var) for int bins
+            min(var), max(var) for int bins.
+            If 0, the number of bins will be calculated optimally with
+            the knuth_bin_width function from astropy.
+        scales: list of str
+            Scales of the axis. The options are linear or log.
+            Default: ['linear']
         factor: float
-            Multiply the distribution by a specific numerical factor
+            Multiply the distribution by a specific numerical factor.
             Default: 1.0
         filters: dict
             Specify the other coordinates domain for the distribution
             It must be defined like: {'var':[var_min, var_max]}
             Default: {}
+        norm_vars: list of str
+            List of the variables to calculate the brilliance, i.e. to
+            normalize the distribution.
+            List of possible variables:
+            mAs [mAs], E [MeV], ln(E0/E), lambda [AA],
+            x [cm], y [cm], z [cm], R [cm], theta [rad],
+            u, v, w, phi [rad], psi [rad],
+            t [ms], log(t),
+        convolution: dict
+            Specify the coordinates to perform a convolution.
+            It must be defined like: {'var':[var_convolution]}
+            Default: {}
         total: bool
-            Define if the integral value is required
+            Define if the integral value is required.
             Default: False
-        norm_vars: list
-            List of string with the variables to calculate the brilliance
 
         Returns
         -------
-
+        p_df: DataFrame
+            Pandas DataFrame with the bins and the distribution.
+        bins: list of arrays
+            List of the bins where the distributions were calculated.
+        p_info: str
+            String with the information of the distributions calculated.
+        p_total: ufloat
+            If total is True, the integral value of the distribution for the
+            required normalization variables.
+        p_units: str
+            If total is True, the units for the integral value of the
+            distribution.
         """
-        pinfo = ''
+        p_info = ''
         old_filters = self._domain
         self._domain = filters
         # df = self.get_pandas_dataframe()
@@ -438,7 +468,7 @@ class SurfaceSourceFile:
         # Normalize the distribution by the brilliance and convolute
         if convolution is not None:
             df = self._convolute(df, convolution)
-        Junits = self._get_brilliance(
+        p_units = self._get_brilliance(
             df, [x for x in norm_vars if x not in vars])
 
         if len(bins) != len(vars):
@@ -502,12 +532,12 @@ class SurfaceSourceFile:
         p_stdv *= factor * self._brilliance * self._S0 / self._Np
         p_total *= factor * self._brilliance * self._S0 / self._Np
 
-        pinfo += self._get_info(df, norm_vars) + '\n'
+        p_info += self._get_info(df, norm_vars) + '\n'
         if type(factor) == int or type(factor) == float:
-            pinfo += 'Integral: {:.3e}\n[{:s}]\n'.format(p_total, Junits)
+            p_info += 'Integral: {:.3e}\n[{:s}]\n'.format(p_total, p_units)
         # TODO
         # if len(bins)==1:
-        #     pinfo += 'Max: {:.3e} at {:.3e} {:s}'.format(
+        #     p_info += 'Max: {:.3e} at {:.3e} {:s}'.format(
         #         max(p_mean), xmed[0][p_mean==max(p_mean)], XUNITS[vars[0]])
 
         # Calculate the relative error
@@ -547,40 +577,75 @@ class SurfaceSourceFile:
         p_df['erel'] = p_erel.ravel()
 
         if total:
-            return p_total, Junits
+            return p_total, p_units
         else:
-            return p_df, bins, pinfo
+            return p_df, bins, p_info
 
     def plot_distribution(self, vars, bins, scales=['linear', 'linear'],
                           factor=1.0, filters={}, norm_vars=[], errors=True,
-                          convolution=None, zlevels=5, info=False, ylabel=None,
+                          convolution=None, zlevels=1, info=False, ylabel=None,
                           zlabel=None, zscale='linear', tolerance=1.0,
                           **kwargs):
         """ Plot 1-D or 2-D distribution for given variables
 
         Parameters
         ----------
-        var: str
-            Variable to calculate the distribution
-        bins: int or list
-            Bins
-            If int, then the distribution is going to be calculated between
-            min(var), max(var) for
-            Default: 100
+        vars: list of str
+            Variables to calculate the distribution
+        bins: list of int or list of iterable
+            Number or array of bins to calculate the distribution.
+            If int, then the distributions are going to be calculated between
+            min(var), max(var) for int bins.
+            If 0, the number of bins will be calculated optimally with
+            the knuth_bin_width function from astropy.
+        scales: list of str
+            Scales of the axis. The options are linear or log.
+            Default: ['linear', 'linear']
         factor: float
-            Multiply the distribution by a specific numerical factor
+            Multiply the distribution by a specific numerical factor.
             Default: 1.0
         filters: dict
             Specify the other coordinates domain for the distribution
             It must be defined like: {'var':[var_min, var_max]}
             Default: {}
+        norm_vars: list of str
+            List of the variables to calculate the brilliance, i.e. to
+            normalize the distribution.
+        errors: bool
+            Specify if the error bars should be plotted or not.
+            Default: True
+        convolution: dict
+            Specify the coordinates to perform a convolution.
+            It must be defined like: {'var':[var_convolution]}
+            Default: {}
+        zlevels: int
+            Number of countour surfaces to plot with the colormap (if more
+            than one variable is required). Deprecated when zscale is 'log'
+            Default: 1
+        info: bool
+            Specify if the information of the plot should be included or not.
+            Default: False
+        ylabel: str
+            Label for the y-axis.
+            Default: 'Brilliance' (for 1-D plots)
+        zlabel: str
+            Label for the z-axis (2-D plots).
+            Default: 'Brilliance'
+        zscale: str
+            Scale for the colorbar (2-D plots).
+            Default: 'linear'
+        tolerance: float
+            When the realive error is greater or equal than the tolerance,
+            the mean values of the distribution are not shown.
+            Default: 1.0
         **kwargs
             Extra arguments that will be passed to matplotlib
             (label, color, and so on)
 
         Returns
         -------
-
+        matplotlib 1-D or 2-D plot for the required variables with the proper
+        normalization.
         """
         xscale, yscale = scales
         scales = [scales[i] for i in range(0, len(bins))]
@@ -618,6 +683,7 @@ class SurfaceSourceFile:
             else:
                 plt.xlabel(r'${:s}$'.format(XLATEX[vars[0]]))
             plt.ylabel(r'{:s}'.format(Jlabel))
+
         elif len(bins) == 2:
             Jbrill = 'Brilliance' if zlabel is None else zlabel
             Jlabel = '{:s}'.format(Jbrill) if Jlabel == ''\
@@ -664,16 +730,19 @@ class SurfaceSourceFile:
                            0.5 * (bins2[1:] + bins2[:-1]),
                            z_mean, shading='auto', **kwargs)
                 cbar = plt.colorbar(label=r'{:s}'.format(Jlabel))
-                lvls = np.linspace(cbar.vmin, cbar.vmax, zlevels)
+                if zlevels > 0:
+                    lvls = np.linspace(cbar.vmin, cbar.vmax, zlevels)
             elif zscale == 'log':
                 plt.pcolor(0.5 * (bins1[1:] + bins1[:-1]),
                            0.5 * (bins2[1:] + bins2[:-1]),
                            z_mean, shading='auto', norm=LogNorm(), **kwargs)
                 cbar = plt.colorbar(label=r'{:s}'.format(Jlabel))
-                lvls = np.logspace(np.floor(np.log10(cbar.vmin)),
-                                   np.ceil(np.log10(cbar.vmax)),
-                                   int(np.ceil(np.log10(cbar.vmax))
-                                   - np.floor(np.log10(cbar.vmin)) + 1))
+                if zlevels > 0:
+                    lvls = np.logspace(
+                        np.floor(np.log10(cbar.vmin)),
+                        np.ceil(np.log10(cbar.vmax)),
+                        int(np.ceil(np.log10(cbar.vmax))
+                            - np.floor(np.log10(cbar.vmin)) + 1))
 
             plt.xscale(xscale)
             plt.yscale(yscale)
@@ -687,11 +756,13 @@ class SurfaceSourceFile:
                     XLATEX[vars[1]], XUNITS[vars[1]]))
             else:
                 plt.ylabel(r'${:s}$'.format(XLATEX[vars[1]]))
-            cntrs = plt.contour(0.5 * (bins[0][1:] + bins[0][:-1]),
-                                0.5 * (bins[1][1:] + bins[1][:-1]),
-                                z_mean, colors='grey', levels=lvls,
-                                vmin=cbar.vmin, vmax=cbar.vmax)
-            cbar.add_lines(cntrs)
+
+            if zlevels > 0:
+                cntrs = plt.contour(0.5 * (bins[0][1:] + bins[0][:-1]),
+                                    0.5 * (bins[1][1:] + bins[1][:-1]),
+                                    z_mean, colors='grey', levels=lvls,
+                                    vmin=cbar.vmin, vmax=cbar.vmax)
+                cbar.add_lines(cntrs)
 
         if info:
             plt.figtext(x=0.92, y=0.1, s=r'{:s}'.format(
@@ -704,6 +775,7 @@ class SurfaceSourceFile:
 
         # Write in the OpenMC .h5 format
         if new_extension == '.h5':
+            print('Saving into OpenMC format (HDF5)')
             for pin, pout in zip((PDGCode), (OpenMCCode)):
                 df.loc[df['type'] == pin.value, 'type'] = pout.value
 
@@ -716,12 +788,12 @@ class SurfaceSourceFile:
                                      ('delayed_group', '<i4'),
                                      ('surf_id', '<i4'),
                                      ('particle', '<i4'), ])
-            arr = np.array([((s[3], s[4], s[5]),
-                             (s[6], s[7], s[8]),
-                             (s[2] * 1e6), (s[9] * 1e-3),
-                             (s[10]), (0), (0), (s[1])) for s in df.values],
-                             dtype=source_dtype)
-
+            arr = np.array([(
+                (s[3], s[4], s[5]),
+                (s[6], s[7], s[8]),
+                (s[2] * 1e6), (s[9] * 1e-3),
+                (s[10]), (0), (0), (s[1]))
+                for s in df.values], dtype=source_dtype)
             kwargs.setdefault('mode', 'w')
             with h5py.File(filepath, **kwargs) as fh:
                 fh.attrs['filetype'] = np.string_("source")
@@ -729,12 +801,14 @@ class SurfaceSourceFile:
 
         # Write in MCPL format
         elif new_extension == '.mcpl':
+            print('Saving into MCPL format')
             self.save_source_file('temp.txt')
             subprocess.call(['ascii2mcpl', 'temp.txt', filepath])
             subprocess.call(['rm', 'temp.txt'])
 
         # Write the ASCII-based format file in the other cases
         else:
+            print('Saving into SSV format (ASCII)')
             with open(filepath, 'w') as fo:
                 sheader = ''
                 fmtstr = ''
@@ -767,3 +841,4 @@ class SurfaceSourceFile:
                     fo.write(fmtstr % (s[0], s[1], s[2], s[3], s[4], s[5],
                                        s[6], s[7], s[8], s[9], s[10], s[11],
                                        s[12], s[13], int(s[14])))
+        print('Done, saved into {:s} file'.format(filepath))
