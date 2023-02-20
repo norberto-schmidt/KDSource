@@ -150,9 +150,17 @@ int Let_perturb(const Metric* metric, mcpl_particle_t* part, double bw, char ker
 	part->ekin *= exp(bw*metric->scaling[0] * rand_type(kernel));
 	return 0;
 }
+int wl_perturb(const Metric* metric, mcpl_particle_t* part, double bw, char kernel){
+	double wl = 9.045 / sqrt(part->ekin * 1e9);
+	double wl2 = wl + bw*metric->scaling[0] * rand_type(kernel);
+	part->ekin = 81.82e-9 / (wl2 * wl2);
+	if(part->ekin < 0) part->ekin *= -1;
+	return 0;
+}
 
 int t_perturb(const Metric* metric, mcpl_particle_t* part, double bw, char kernel){
 	part->time += bw*metric->scaling[0] * rand_type(kernel);
+	if(part->time < 0) part->time *= -1;
 	return 0;
 }
 int Dec_perturb(const Metric* metric, mcpl_particle_t* part, double bw, char kernel){

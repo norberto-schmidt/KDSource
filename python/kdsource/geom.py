@@ -354,6 +354,32 @@ class Lethargy(Metric):
             raise Exception("Invalid metric tree.")
         return Lethargy(*params)
 
+class Wavelength(Metric):
+    def __init__(self):
+        """
+        Wavelength metric for energy.
+
+        Wavelength is defined as:
+            lambda [\AA] = 9.045 / sqrt(E [meV])
+        """
+        super().__init__([0], ["l"], ["[AA]"], "AA")
+
+    def transform(self, ekins):
+        """Transform energy to lethargy."""
+        return 9.045 / np.sqrt(ekins * 1e9)
+
+    def inverse_transform(self, ls):
+        """Transform lethargy to energy."""
+        return 81.82e-9 / ls ** 2
+
+    def jac(self, ekins):
+        """Jacobian of lethargy transformation."""
+        return 9.045 / (2 * np.sqrt(ekins ** 3))
+
+    @staticmethod
+    def load(mtree):
+        """Load parameters from XML tree and build Lethargy."""
+        return Wavelength()
 
 class Time(Metric):
     def __init__(self):
@@ -1015,6 +1041,7 @@ class PolarMu(Metric):
 _metrics = {
     "Energy": Energy,
     "Lethargy": Lethargy,
+    "Wavelength": Wavelength,
     "Vol": Vol,
     "SurfXY": SurfXY,
     "SurfR": SurfR,

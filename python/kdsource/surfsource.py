@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 from uncertainties import ufloat
 
-plt.style.use(os.path.dirname(os.path.abspath(__file__)) + '/plots.mplstyle')
+# plt.style.use(os.path.dirname(os.path.abspath(__file__)) + '/plots.mplstyle')
+plt.style.use('/home/nschmidt/kdsource/develop/python/kdsource/plots.mplstyle')
 
 MCPLColumns = ['id', 'type', 'E', 'x', 'y', 'z', 'u', 'v', 'w',
                't', 'wgt', 'px', 'py', 'pz', 'userflags']
@@ -50,6 +51,14 @@ class OpenMCCode(Enum):
     ELECTRON = 2
     POSITRON = 3
     PROTON = 4
+
+
+class VitessCode(Enum):
+    NEUTRON = 'N'
+    PHOTON = 'G'
+    ELECTRON = 'E-'
+    POSITRON = 'E+'
+    PROTON = 'P'
 
 
 class SurfaceSourceFile:
@@ -178,10 +187,27 @@ class SurfaceSourceFile:
                     df = df[df['userflags'] == int(self._surface)]
                 df['id'] = np.arange(0, len(df))
                 df = df[MCPLColumns]
+        # VITESS format (for detectors, not for dump files)
+        elif self._extension == '.vitess':
+            df = pd.DataFrame(np.loadtxt(self._filepath,
+                                         usecols=list(np.arange(3, 15))),
+                              columns=['t', 'E', 'wgt', 'z', 'x', 'y',
+                                       'w', 'u', 'v', 'px', 'py', 'pz'])
+            df['E'] = (72.3 / (252.8 * df['E'].to_numpy())) ** 2 * 1e-6
+            df['id'] = [int(i[2:])-1 for i in np.loadtxt(self._filepath,
+                                                       dtype='str',
+                                                       usecols=(0))]
+            df['type'] = np.loadtxt(self._filepath, dtype='str', usecols=(1))
+            df['userflags'] = 0x00000000
+            for pin, pout in zip((VitessCode), (PDGCode)):
+                df.loc[df['type'] == pin.value, 'type'] = pout.value
+            df = df[MCPLColumns]
         # ASCII format, for all the other cases
         else:
             df = pd.DataFrame(np.loadtxt(
                 self._filepath, skiprows=5), columns=MCPLColumns)
+
+        df = self.search_duplicated_particles(df)
 
         # Print some info regarding the particles in the file
         print('Number of particles in file {:s}: {:d}'.format(
@@ -237,12 +263,19 @@ class SurfaceSourceFile:
             df = self._set_domain(df)
         return df
 
+    def search_duplicated_particles(self, df):
+        newwgt = df.groupby(['u', 'v', 'w'], sort = False, as_index = False,
+                            ).sum(numeric_only = True)['wgt'].values
+        newdf = df.drop_duplicates(['u', 'v', 'w'],
+                                   ignore_index = True).copy()
+        newdf['wgt'] = newwgt
+        return newdf
+
     def _set_translation(self, df):
         # Translate the coordinates (only position)
         df['x'] = df['x'].to_numpy() + self._translation[0]
         df['y'] = df['y'].to_numpy() + self._translation[1]
         df['z'] = df['z'].to_numpy() + self._translation[2]
-
         return df
 
     def _set_rotation(self, df):
@@ -384,7 +417,7 @@ class SurfaceSourceFile:
         # info += 'Rotation: [{:.1f}, {:.1f}, {:.1f}]\n\n'.format(
         #     self._rotation[0], self._rotation[1], self._rotation[2])
         info += '\n'
-        info += 'Brilliance:\n'
+        info += 'Intensity:\n'
         for pvar in vars:
             if pvar != 'mAs':
                 pmin = min(df[pvar])
@@ -627,10 +660,10 @@ class SurfaceSourceFile:
             Default: False
         ylabel: str
             Label for the y-axis.
-            Default: 'Brilliance' (for 1-D plots)
+            Default: 'Intensity' (for 1-D plots)
         zlabel: str
             Label for the z-axis (2-D plots).
-            Default: 'Brilliance'
+            Default: 'Intensity'
         zscale: str
             Scale for the colorbar (2-D plots).
             Default: 'linear'
@@ -658,7 +691,7 @@ class SurfaceSourceFile:
         Jlabel = self._get_units(norm_vars)
 
         if len(bins) == 1:
-            Jbrill = 'Brilliance' if ylabel is None else '{:s}'.format(ylabel)
+            Jbrill = 'Intensity' if ylabel is None else '{:s}'.format(ylabel)
             Jlabel = '{:s}'.format(Jbrill) if Jlabel == '' \
                 else '{:s} [ {:s} ]'.format(Jbrill, Jlabel)
             if xscale == 'log':
@@ -685,7 +718,7 @@ class SurfaceSourceFile:
             plt.ylabel(r'{:s}'.format(Jlabel))
 
         elif len(bins) == 2:
-            Jbrill = 'Brilliance' if zlabel is None else zlabel
+            Jbrill = 'Intensity' if zlabel is None else zlabel
             Jlabel = '{:s}'.format(Jbrill) if Jlabel == ''\
                 else '{:s} [ {:s} ]'.format(Jbrill, Jlabel)
 
@@ -769,76 +802,79 @@ class SurfaceSourceFile:
                 pinfo), fontdict={'size': 8})
 
     def save_source_file(self, filepath, **kwargs):
-        new_extension = os.path.splitext(filepath)[-1]
-        df = self._df2.copy()  # get_pandas_dataframe()
-        df = df[MCPLColumns]
+        create_source_file(self._df2.copy(), filepath, **kwargs)
 
-        # Write in the OpenMC .h5 format
-        if new_extension == '.h5':
-            print('Saving into OpenMC format (HDF5)')
-            for pin, pout in zip((PDGCode), (OpenMCCode)):
-                df.loc[df['type'] == pin.value, 'type'] = pout.value
+def create_source_file(df, filepath, **kwargs):
+    new_extension = os.path.splitext(filepath)[-1]
+    df = df[MCPLColumns]
 
-            pos_dtype = np.dtype([('x', '<f8'), ('y', '<f8'), ('z', '<f8')])
-            source_dtype = np.dtype([('r', pos_dtype),
-                                     ('u', pos_dtype),
-                                     ('E', '<f8'),
-                                     ('time', '<f8'),
-                                     ('wgt', '<f8'),
-                                     ('delayed_group', '<i4'),
-                                     ('surf_id', '<i4'),
-                                     ('particle', '<i4'), ])
-            arr = np.array([(
-                (s[3], s[4], s[5]),
-                (s[6], s[7], s[8]),
-                (s[2] * 1e6), (s[9] * 1e-3),
-                (s[10]), (0), (0), (s[1]))
-                for s in df.values], dtype=source_dtype)
-            kwargs.setdefault('mode', 'w')
-            with h5py.File(filepath, **kwargs) as fh:
-                fh.attrs['filetype'] = np.string_("source")
-                fh.create_dataset('source_bank', data=arr, dtype=source_dtype)
+    # Write in the OpenMC .h5 format
+    if new_extension == '.h5':
+        print('Saving into OpenMC format (HDF5)')
+        for pin, pout in zip((PDGCode), (OpenMCCode)):
+            df.loc[df['type'] == pin.value, 'type'] = pout.value
 
-        # Write in MCPL format
-        elif new_extension == '.mcpl':
-            print('Saving into MCPL format')
-            self.save_source_file('temp.txt')
-            subprocess.call(['ascii2mcpl', 'temp.txt', filepath])
-            subprocess.call(['rm', 'temp.txt'])
+        pos_dtype = np.dtype([('x', '<f8'), ('y', '<f8'), ('z', '<f8')])
+        source_dtype = np.dtype([('r', pos_dtype),
+                                    ('u', pos_dtype),
+                                    ('E', '<f8'),
+                                    ('time', '<f8'),
+                                    ('wgt', '<f8'),
+                                    ('delayed_group', '<i4'),
+                                    ('surf_id', '<i4'),
+                                    ('particle', '<i4'), ])
+        arr = np.array([(
+            (s[3], s[4], s[5]),
+            (s[6], s[7], s[8]),
+            (s[2] * 1e6), (s[9] * 1e-3),
+            (s[10]), (0), (0), (s[1]))
+            for s in df.values], dtype=source_dtype)
+        kwargs.setdefault('mode', 'w')
+        with h5py.File(filepath, **kwargs) as fh:
+            fh.attrs['filetype'] = np.string_("source")
+            fh.create_dataset('source_bank', data=arr, dtype=source_dtype)
 
-        # Write the ASCII-based format file in the other cases
-        else:
-            print('Saving into SSV format (ASCII)')
-            with open(filepath, 'w') as fo:
-                sheader = ''
-                fmtstr = ''
+    # Write in MCPL format
+    elif new_extension == '.mcpl' or new_extension == '.gz':
+        new_extension = '.mcpl'
+        print('Saving into MCPL format')
+        create_source_file(df, 'temp.txt')
+        subprocess.call(['ssv2mcpl', 'temp.txt', filepath])
+        subprocess.call(['rm', 'temp.txt'])
 
-                sheader += '#MCPL-ASCII\n'
-                sheader += '#GENERATED FROM KDSOURCE\n'
-                sheader += '#NPARTICLES: {:d}\n'.format(len(df))
-                sheader += '#END-HEADER\n'
-                sheader += "index     "
-                sheader += "pdgcode               "
-                sheader += "ekin[MeV]                   "
-                sheader += "x[cm]                   "
-                sheader += "y[cm]                   "
-                sheader += "z[cm]                      "
-                sheader += "ux                      "
-                sheader += "uy                      "
-                sheader += "uz                "
-                sheader += "time[ms]                  "
-                sheader += "weight                   "
-                sheader += "pol-x                   "
-                sheader += "pol-y                   "
-                sheader += "pol-z  "
-                sheader += "userflags\n"
-                fo.write(sheader)
+    # Write the ASCII-based format file in the other cases
+    else:
+        print('Saving into SSV format (ASCII)')
+        with open(filepath, 'w') as fo:
+            sheader = ''
+            fmtstr = ''
 
-                fmtstr += "%5i %11i %23.18g %23.18g %23.18g %23.18g "
-                fmtstr += "%23.18g %23.18g %23.18g %23.18g %23.18g "
-                fmtstr += "%23.18g %23.18g %23.18g 0x%08x\n"
-                for s in df.values:
-                    fo.write(fmtstr % (s[0], s[1], s[2], s[3], s[4], s[5],
-                                       s[6], s[7], s[8], s[9], s[10], s[11],
-                                       s[12], s[13], int(s[14])))
-        print('Done, saved into {:s} file'.format(filepath))
+            sheader += '#MCPL-ASCII\n'
+            sheader += '#GENERATED FROM KDSOURCE\n'
+            sheader += '#NPARTICLES: {:d}\n'.format(len(df))
+            sheader += '#END-HEADER\n'
+            sheader += "index     "
+            sheader += "pdgcode               "
+            sheader += "ekin[MeV]                   "
+            sheader += "x[cm]                   "
+            sheader += "y[cm]                   "
+            sheader += "z[cm]                      "
+            sheader += "ux                      "
+            sheader += "uy                      "
+            sheader += "uz                "
+            sheader += "time[ms]                  "
+            sheader += "weight                   "
+            sheader += "pol-x                   "
+            sheader += "pol-y                   "
+            sheader += "pol-z  "
+            sheader += "userflags\n"
+            fo.write(sheader)
+
+            fmtstr += "%5i %11i %23.18g %23.18g %23.18g %23.18g "
+            fmtstr += "%23.18g %23.18g %23.18g %23.18g %23.18g "
+            fmtstr += "%23.18g %23.18g %23.18g 0x%08x\n"
+            for s in df.values:
+                fo.write(fmtstr % (s[0], s[1], s[2], s[3], s[4], s[5],
+                                    s[6], s[7], s[8], s[9], s[10], s[11],
+                                    s[12], s[13], int(s[14])))
+    print('Done, saved into {:s} file'.format(filepath))
